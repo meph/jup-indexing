@@ -6,7 +6,9 @@ import assert from 'assert'
 //import * as tokenProgram from './abi/token-program'
 import * as jupiter from './abi/jupiter'
 import * as tokenProgram from './abi/tokenProgram'
-import {Exchange} from './model'
+import * as raydium from './abi/raydium'
+import { JupSignature, SolTrade, TokenTrade } from './model'
+import { DecodedInstruction } from './abi/abi.support'
 
 // First we create a DataSource - component,
 // that defines where to get the data and what data should we get.
@@ -22,7 +24,7 @@ const dataSource = new DataSourceBuilder()
             url: process.env.SOLANA_NODE,
             // rateLimit: 100 // requests per sec
         }),
-        strideConcurrency: 10
+        strideConcurrency: 20
     })
     // Currently only blocks from 240_000_000 and above are stored in Subsquid Network.
     // When we specify it, we must also limit the range of requested blocks.
@@ -68,6 +70,7 @@ const dataSource = new DataSourceBuilder()
             accounts: true,
             data: true,
             isCommitted: true,
+            //logs: true,
         },
         tokenBalance: { // token balance record fields
             preAmount: true,
@@ -104,9 +107,10 @@ const dataSource = new DataSourceBuilder()
             innerInstructions: true, // inner instructions
             transaction: true, // transaction, that executed the given instruction
             transactionTokenBalances: true, // all token balance records of executed transaction
-            logs: true, // logs of the instruction
+            //logs: true, // logs of the instruction
         }
-    }).build()
+    })
+    .build()
 
 
 // Once we've prepared a data source we can start fetching the data right away:
@@ -160,7 +164,10 @@ run(dataSource, database, async ctx => {
     // with convenient getters for derived data (e.g. `Instruction.d8`).
     let blocks = ctx.blocks.map(augmentBlock)
 
-    let exchanges: Exchange[] = []
+    //let exchanges: Exchange[] = []
+    let trades: SolTrade[] = []
+    let tokenTrades: TokenTrade[] = []
+    let jupSignatures: JupSignature[] = []
 
     for (let block of blocks) {
         for (let ins of block.instructions) {
@@ -173,13 +180,6 @@ run(dataSource, database, async ctx => {
                 //     timestamp: new Date(block.header.timestamp * 1000)
                 // })
 
-                // if(ins.d8 === jupiter.instructions.route.d8) {
-                //     let route = jupiter.instructions.route.decode({accounts: ins.accounts, data: ins.data});
-
-                //     console.log("------------------------------------------------------------------------");
-                //     console.log(ins)
-                //     console.log(route);
-                // }
 
                 if(ins.d8 === jupiter.instructions.sharedAccountsRoute.d8) {
 
@@ -229,51 +229,59 @@ run(dataSource, database, async ctx => {
 
                     console.log("ROUTE ========================================================================");
 
-                    // block.logs.forEach((log) => {
-                    //     if(log.transactionIndex === ins.transactionIndex){
-                    //         console.log(log.message);
-                    //     }
-                    // });
-
-
-                    /// IDEA - scan token account cahnges for such swaps!
-
                     let route = jupiter.instructions.route.decode({accounts: ins.accounts, data: ins.data});
-                    console.log(route);
+                    console.log(ins.getTransaction().signatures[0]);
+                    //console.log(route);
                     let signature = ins.transaction?.signatures[0] || '';
                     let trader = route.accounts.userTransferAuthority;
                     let timestamp = new Date(block.header.timestamp * 1000);
                     let mint_spent = '';
                     let mint_got = route.accounts.destinationMint;
                     let amount_spent = parseInt(route.data.inAmount.toString());
+                    let amount_got: number = 0;
                     let quotedOutAmount = route.data.quotedOutAmount.toString();
                     let fee = parseInt(ins.getTransaction().fee.toString());
                     let tokendelta: string = "";
                     
+                    //let srcTransfer: DecodedInstruction<{ source: string; tokenMint: string; destination: string; owner: string; signers: string }, { amount: bigint; decimals: number }> | DecodedInstruction<{ source: string; destination: string; authority: string; signers: string }, { amount: bigint }>;
+                    //let dstTransfer: DecodedInstruction<{ source: string; tokenMint: string; destination: string; owner: string; signers: string }, { amount: bigint; decimals: number }> | DecodedInstruction<{ source: string; destination: string; authority: string; signers: string }, { amount: bigint }>;
+
+                    let lastintstdata = '';
                     ins.getTransaction().instructions.forEach((inst) => {
+
                         if(inst.programId === tokenProgram.programId && inst.d1 === tokenProgram.instructions.transferChecked.d1){
                             let transfer = tokenProgram.instructions.transferChecked.decode({accounts: inst.accounts, data: inst.data});
-                            console.log(inst.instructionAddress);
-                            console.log("! Token Mint: ", transfer.accounts.tokenMint.toString());
-                            console.log("! Source: ", transfer.accounts.source.toString());
-                            console.log("! Destination: ", transfer.accounts.destination.toString());
-                            console.log("! Amount: ", transfer.data.amount.toString());
-                            //console.log(transfer.data.amount.toString());
-                            tokendelta = transfer.data.amount.toString();
-                        }
-                        // console.log("++++++ EVENT ++++++");
-                        // block.logs.forEach((log) => {
-                        //     if(log.transactionIndex === ins.transactionIndex){
-                        //         if(log.kind === "data") {
-                        //             console.log(log);
-                        //         }
-                        //     }
-                        // });
-                        // console.log("^^^^^^^ EVENT ^^^^^^");
-                    });
+                            if(transfer.accounts.source === route.accounts.userSourceTokenAccount) {
+                                let srcTransfer = transfer;
+                                mint_spent = transfer.accounts.tokenMint;
+                                amount_spent = parseInt(transfer.data.amount.toString());
+                            }
+                            if(transfer.accounts.destination === route.accounts.userDestinationTokenAccount) {
+                                let dstTransfer = transfer;
+                                mint_got = transfer.accounts.tokenMint;
+                                amount_got = parseInt(transfer.data.amount.toString());
+                            }
 
-                    
-                    let amount_got = parseInt(tokendelta);
+                        }
+
+                        if(inst.programId === tokenProgram.programId && inst.d1 === tokenProgram.instructions.transfer.d1) {
+                            let transfer = tokenProgram.instructions.transfer.decode({accounts: inst.accounts, data: inst.data});
+                            if(transfer.accounts.source === route.accounts.userSourceTokenAccount) {
+                                amount_spent = parseInt(transfer.data.amount.toString());
+                                mint_spent = ins.getTransaction().tokenBalances.find(tb => tb.account === transfer.accounts.destination)?.preMint ?? '';
+                            }
+                            if(transfer.accounts.destination === route.accounts.userDestinationTokenAccount) {
+                                amount_got = parseInt(transfer.data.amount.toString());
+                            }
+                            //console.log("Transfer: ", transfer);
+                        }
+                        
+                        // if(inst.programId === raydium.programId) {
+                        //     let swap = raydium.instructions.swapBaseIn.decode({accounts: inst.accounts, data: inst.data});
+                        //     console.log("SwapBaseIn: ", swap);
+                        // }
+
+                    });                    
 
                     // ------------------------------------------------------------------------
                     
@@ -286,6 +294,10 @@ run(dataSource, database, async ctx => {
                     console.log("mint_got: ", mint_got);
                     console.log("amount_got: ", amount_got);
                     console.log("fee:", fee);
+
+                    if (mint_got === mint_got) {
+                        console.log("Mint is the same -> skip arbitrages");
+                    }
 
                     // console.log(route);
                     // console.log(route.data.routePlan);
