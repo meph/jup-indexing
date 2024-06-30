@@ -13,6 +13,8 @@ import * as dotenv from 'dotenv';
 
 dotenv.config();
 
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
 // First we create a DataSource - component,
 // that defines where to get the data and what data should we get.
 const dataSource = new DataSourceBuilder()
@@ -187,12 +189,6 @@ run(dataSource, database, async ctx => {
         for (let ins of block.instructions) {
             // https://read.cryptodatabytes.com/p/starter-guide-to-solana-data-analysis
             if (ins.programId === jupiter.programId && ins.inner.length > 1) {
-                // let exchange = new Exchange({
-                //     id: ins.id,
-                //     slot: block.header.slot,
-                //     tx: ins.getTransaction().signatures[0],
-                //     timestamp: new Date(block.header.timestamp * 1000)
-                // })
 
                 //console.log("PROCESSING NEW TRADE#  +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
 
@@ -335,8 +331,55 @@ run(dataSource, database, async ctx => {
                 }
 
                 if (trade.mint_got === trade.mint_spent) break;
-                
-                console.log(trade);
+
+                let solIn = trade.mint_spent === SOL_MINT;
+                let solOut = trade.mint_got === SOL_MINT;
+
+                if(solIn || solOut) {
+                    let solTrade = new SolTrade({
+                        id: trade.signature,
+                        bucket: 1,
+                        trader: trade.trader,
+                        mint: solIn ? trade.mint_got : trade.mint_spent,
+                        timestamp: trade.timestamp,
+                        token_delta: solIn ? trade.amount_got : -trade.amount_spent,
+                        sol_delta: solIn ? -trade.amount_spent : trade.amount_got,
+                        fee: trade.fee
+                    });
+
+                    solTrades.push(solTrade);
+
+                    //console.log(solTrade);
+
+                } else {
+                    let tokenTrade = new TokenTrade({
+                        id: trade.signature,
+                        bucket: 1,
+                        trader: trade.trader,
+                        timestamp: trade.timestamp,
+                        mint_spent: trade.mint_spent,
+                        amount_spent: trade.amount_spent,
+                        mint_got: trade.mint_got,
+                        amount_got: trade.amount_got,
+                        fee: trade.fee
+                    });
+
+                    tokenTrades.push(tokenTrade);
+                    //console.log(tokenTrade);
+                }
+
+                let jup_signature = new JupSignature({
+                    id: trade.signature,
+                    timestamp: trade.timestamp,
+                    bucket: 1,
+                    processed: true,
+                    is_trade_extracted: true
+                });
+
+                jupSignatures.push(jup_signature);
+
+
+                //console.log(trade);
                 
                 
                 // exchange.fromToken = srcMint
@@ -352,7 +395,75 @@ run(dataSource, database, async ctx => {
         }
     }
 
-    
+    //console.log(solTrades);
+
+    const idMap: { [key: string]: number } = {};
+    const duplicates: string[] = [];
+
+    solTrades.forEach(trade => {
+        if (idMap[trade.id]) {
+            idMap[trade.id]++;
+        } else {
+            idMap[trade.id] = 1;
+        }
+    });
+
+    for (const id in idMap) {
+        if (idMap[id] > 1) {
+            duplicates.push(id);
+        }
+    }
+
+    //console.log(duplicates);
+
+    console.log("Duplicates:", duplicates.length, "of", solTrades.length);
+
+    duplicates.forEach(id => {
+        console.log("Duplicate ID: ", id);
+        let count = 0;
+        let firstTrade: SolTrade = {
+            id: '',
+            bucket: 0,
+            trader: '',
+            mint: '',
+            timestamp: new Date(),
+            token_delta: 0,
+            sol_delta: 0,
+            fee: 0
+        };
+        let secordTrade: SolTrade = firstTrade;
+
+        solTrades.forEach(trade => {
+            if (trade.id === id) {
+                count += 1;
+                // console.log(count, "-----------------------------------------------------------------------------------------------------------------");
+                // console.log(trade);
+                if (count === 1) {
+                    firstTrade = trade;
+                } else {
+                    secordTrade = trade;
+                }
+            }
+        });
+
+        let trade = firstTrade;
+
+        trade.sol_delta = firstTrade.sol_delta;
+        trade.token_delta = -secordTrade.token_delta;
+
+        solTrades = solTrades.filter(trd => trade.id !== trd.id);
+
+        solTrades.push(trade);
+
+        // console.log("FinalTrade: ",trade);
+
+    });
+
+
+
+    await ctx.store.insert(solTrades);
+    //await ctx.store.insert(tokenTrades);
+    //await ctx.store.insert(jupSignatures);
 
     //await ctx.store.insert(exchanges)
 })

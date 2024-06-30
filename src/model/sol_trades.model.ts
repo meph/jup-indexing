@@ -31,4 +31,7 @@ export class SolTrade {
 
   @FloatColumn({ nullable: true })
   sol_delta!: number;
+
+  @IntColumn({ nullable: true })
+  fee!: number;
 }

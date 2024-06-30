@@ -34,4 +34,7 @@ export class TokenTrade {
 
   @Column('float', { nullable: true })
   amount_got!: number;
+
+  @IntColumn({ nullable: true })
+  fee!: number;
 }
