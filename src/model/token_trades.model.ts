@@ -3,6 +3,11 @@ import {BigIntColumn, DateTimeColumn, Entity, IntColumn, PrimaryColumn, StringCo
 @Entity('token_trades')
 @Index('idx_token_trades_1', ['timestamp'])
 export class TokenTrade {
+
+    constructor(props?: Partial<TokenTrade>) {
+        Object.assign(this, props)
+    }
+
   @PrimaryColumn()
   id!: string;
 
@@ -15,7 +20,7 @@ export class TokenTrade {
   @Column('varchar', { length: 50, nullable: true })
   trader!: string;
 
-  @Column('datetime', { nullable: true })
+  @Column('timestamp', { nullable: true })
   timestamp!: Date;
 
   @Column('varchar', { length: 50, nullable: true })

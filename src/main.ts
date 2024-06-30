@@ -7,7 +7,7 @@ import assert from 'assert'
 import * as jupiter from './abi/jupiter'
 import * as tokenProgram from './abi/tokenProgram'
 import * as raydium from './abi/raydium'
-import { Exchange } from './model'
+import { Exchange, SolTrade, TokenTrade, JupSignature } from './model'
 import { DecodedInstruction } from './abi/abi.support'
 import * as dotenv from 'dotenv';
 
@@ -157,6 +157,17 @@ const dataSource = new DataSourceBuilder()
 // https://github.com/subsquid/squid-sdk/blob/278195bd5a5ed0a9e24bfb99ee7bbb86ff94ccb3/typeorm/typeorm-config/src/config.ts#L21
 const database = new TypeormDatabase();
 
+interface Trade {
+    type: string;
+    signature: string;
+    timestamp: Date;
+    trader: string;
+    mint_spent: string;
+    amount_spent: number;
+    mint_got: string;
+    amount_got: number;
+    fee: number;
+}
 
 // Now we are ready to start data processing
 run(dataSource, database, async ctx => {
@@ -168,14 +179,14 @@ run(dataSource, database, async ctx => {
     let blocks = ctx.blocks.map(augmentBlock)
 
     let exchanges: Exchange[] = []
-    // let trades: SolTrade[] = []
-    // let tokenTrades: TokenTrade[] = []
-    // let jupSignatures: JupSignature[] = []
+    let solTrades: SolTrade[] = []
+    let tokenTrades: TokenTrade[] = []
+    let jupSignatures: JupSignature[] = []
 
     for (let block of blocks) {
         for (let ins of block.instructions) {
             // https://read.cryptodatabytes.com/p/starter-guide-to-solana-data-analysis
-            if (ins.programId === jupiter.programId) {
+            if (ins.programId === jupiter.programId && ins.inner.length > 1) {
                 // let exchange = new Exchange({
                 //     id: ins.id,
                 //     slot: block.header.slot,
@@ -183,10 +194,23 @@ run(dataSource, database, async ctx => {
                 //     timestamp: new Date(block.header.timestamp * 1000)
                 // })
 
+                //console.log("PROCESSING NEW TRADE#  +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
+
+                let trade: Trade = {
+                    type: '',
+                    signature: ins.getTransaction().signatures[0],
+                    timestamp: new Date(block.header.timestamp * 1000),
+                    trader: '',
+                    mint_spent: '',
+                    amount_spent: 0,
+                    mint_got: '',
+                    amount_got: 0,
+                    fee: 0
+                };
 
                 if(ins.d8 === jupiter.instructions.sharedAccountsRoute.d8) {
 
-                    console.log("sharedAccountsRoute------------------------------------------------------------------------");
+                    //console.log("sharedAccountsRoute------------------------------------------------------------------------");
 
                     let route = jupiter.instructions.sharedAccountsRoute.decode({accounts: ins.accounts, data: ins.data});
                     let signature = ins.transaction?.signatures[0] || '';
@@ -203,8 +227,6 @@ run(dataSource, database, async ctx => {
                     ins.getTransaction().instructions.forEach((inst) => {
                         if(inst.programId === tokenProgram.programId && inst.d1 === tokenProgram.instructions.transferChecked.d1){
                             let transfer = tokenProgram.instructions.transferChecked.decode({accounts: inst.accounts, data: inst.data});
-                            //console.log(inst.instructionAddress);
-                            //console.log(transfer.data.amount.toString());
                             tokendelta = transfer.data.amount;
                         }
                     });
@@ -214,15 +236,27 @@ run(dataSource, database, async ctx => {
                     // ------------------------------------------------------------------------
                     
                     
-                    console.log("signature: ", signature);
-                    console.log("timestamp: ", timestamp);
-                    console.log("trader:", trader);
-                    console.log("mint_spent: ", mint_spent);
-                    console.log("amount_spent: ", amount_spent);
-                    console.log("mint_got: ", mint_got);
-                    console.log("amount_got: ", amount_got);
-                    console.log("quotedOutAmount: ", quotedOutAmount);
-                    console.log("fee:", fee);
+                    // console.log("signature: ", signature);
+                    // console.log("timestamp: ", timestamp);
+                    // console.log("trader:", trader);
+                    // console.log("mint_spent: ", mint_spent);
+                    // console.log("amount_spent: ", amount_spent);
+                    // console.log("mint_got: ", mint_got);
+                    // console.log("amount_got: ", amount_got);
+                    // console.log("quotedOutAmount: ", quotedOutAmount);
+                    // console.log("fee:", fee);
+
+                    trade = {
+                        type: 'sharedAccountsRoute',
+                        signature: signature,
+                        timestamp: timestamp,
+                        trader: trader,
+                        mint_spent: mint_spent,
+                        amount_spent: amount_spent,
+                        mint_got: mint_got,
+                        amount_got: parseInt(amount_got.toString()),
+                        fee: fee    
+                    };
 
                     // console.log(route);
                     // console.log(route.data.routePlan);
@@ -230,11 +264,10 @@ run(dataSource, database, async ctx => {
 
                 if (ins.d8 === jupiter.instructions.route.d8) {
 
-                    console.log("ROUTE ========================================================================");
+                    //console.log("ROUTE ========================================================================");
 
                     let route = jupiter.instructions.route.decode({accounts: ins.accounts, data: ins.data});
-                    console.log(ins.getTransaction().signatures[0]);
-                    //console.log(route);
+                    //console.log(ins.getTransaction().signatures[0]);
                     let signature = ins.transaction?.signatures[0] || '';
                     let trader = route.accounts.userTransferAuthority;
                     let timestamp = new Date(block.header.timestamp * 1000);
@@ -244,23 +277,15 @@ run(dataSource, database, async ctx => {
                     let amount_got: number = 0;
                     let quotedOutAmount = route.data.quotedOutAmount.toString();
                     let fee = parseInt(ins.getTransaction().fee.toString());
-                    let tokendelta: string = "";
-                    
-                    //let srcTransfer: DecodedInstruction<{ source: string; tokenMint: string; destination: string; owner: string; signers: string }, { amount: bigint; decimals: number }> | DecodedInstruction<{ source: string; destination: string; authority: string; signers: string }, { amount: bigint }>;
-                    //let dstTransfer: DecodedInstruction<{ source: string; tokenMint: string; destination: string; owner: string; signers: string }, { amount: bigint; decimals: number }> | DecodedInstruction<{ source: string; destination: string; authority: string; signers: string }, { amount: bigint }>;
-
-                    let lastintstdata = '';
                     ins.getTransaction().instructions.forEach((inst) => {
 
                         if(inst.programId === tokenProgram.programId && inst.d1 === tokenProgram.instructions.transferChecked.d1){
                             let transfer = tokenProgram.instructions.transferChecked.decode({accounts: inst.accounts, data: inst.data});
                             if(transfer.accounts.source === route.accounts.userSourceTokenAccount) {
-                                let srcTransfer = transfer;
                                 mint_spent = transfer.accounts.tokenMint;
                                 amount_spent = parseInt(transfer.data.amount.toString());
                             }
                             if(transfer.accounts.destination === route.accounts.userDestinationTokenAccount) {
-                                let dstTransfer = transfer;
                                 mint_got = transfer.accounts.tokenMint;
                                 amount_got = parseInt(transfer.data.amount.toString());
                             }
@@ -278,49 +303,42 @@ run(dataSource, database, async ctx => {
                             }
                             //console.log("Transfer: ", transfer);
                         }
-                        
-                        // if(inst.programId === raydium.programId) {
-                        //     let swap = raydium.instructions.swapBaseIn.decode({accounts: inst.accounts, data: inst.data});
-                        //     console.log("SwapBaseIn: ", swap);
-                        // }
 
                     });                    
 
                     // ------------------------------------------------------------------------
                     
                     
-                    console.log("signature: ", signature);
-                    console.log("timestamp: ", timestamp);
-                    console.log("trader:", trader);
-                    console.log("mint_spent: ", mint_spent);
-                    console.log("amount_spent: ", amount_spent);
-                    console.log("mint_got: ", mint_got);
-                    console.log("amount_got: ", amount_got);
-                    console.log("fee:", fee);
+                    // console.log("signature: ", signature);
+                    // console.log("timestamp: ", timestamp);
+                    // console.log("trader:", trader);
+                    // console.log("mint_spent: ", mint_spent);
+                    // console.log("amount_spent: ", amount_spent);
+                    // console.log("mint_got: ", mint_got);
+                    // console.log("amount_got: ", amount_got);
+                    // console.log("fee:", fee);
 
-                    if (mint_got === mint_got) {
-                        console.log("Mint is the same -> skip arbitrages");
+                    trade = {
+                        type: 'route',
+                        signature: signature,
+                        timestamp: timestamp,
+                        trader: trader,
+                        mint_spent: mint_spent,
+                        amount_spent: amount_spent,
+                        mint_got: mint_got,
+                        amount_got: amount_got,
+                        fee: fee
                     }
 
                     // console.log(route);
                     // console.log(route.data.routePlan);
                 }
 
-
-
-                // assert(ins.inner.length == 2)
-                // let srcTransfer = tokenProgram.instructions.transfer.decode(ins.inner[0])
-                // let destTransfer = tokenProgram.instructions.transfer.decode(ins.inner[1])
-
-                // let srcBalance = ins.getTransaction().tokenBalances.find(tb => tb.account == srcTransfer.accounts.source)
-                // let destBalance = ins.getTransaction().tokenBalances.find(tb => tb.account === destTransfer.accounts.destination)
-
-                // let srcMint = ins.getTransaction().tokenBalances.find(tb => tb.account === srcTransfer.accounts.destination)?.preMint
-                // let destMint = ins.getTransaction().tokenBalances.find(tb => tb.account === destTransfer.accounts.source)?.preMint
-
-                // assert(srcMint)
-                // assert(destMint)
-
+                if (trade.mint_got === trade.mint_spent) break;
+                
+                console.log(trade);
+                
+                
                 // exchange.fromToken = srcMint
                 // exchange.fromOwner = srcBalance?.preOwner || srcTransfer.accounts.source
                 // exchange.fromAmount = srcTransfer.data.amount
@@ -333,6 +351,8 @@ run(dataSource, database, async ctx => {
             }
         }
     }
+
+    
 
     //await ctx.store.insert(exchanges)
 })

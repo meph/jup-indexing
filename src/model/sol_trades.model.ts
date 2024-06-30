@@ -5,8 +5,14 @@ import {BigIntColumn, DateTimeColumn, Entity, IntColumn, PrimaryColumn, StringCo
 @Index('idx_sol_trades_2', ['timestamp'])
 @Index('idx_sol_trades_3', ['mint'])
 export class SolTrade {
-  @Column('varchar', {nullable: false, length: 100 })
-  signature!: string;
+
+    constructor(props?: Partial<SolTrade>) {
+        Object.assign(this, props)
+    }
+
+
+  @PrimaryColumn()
+  id!: string;
 
   @IntColumn({ nullable: false })
   bucket!: number;
