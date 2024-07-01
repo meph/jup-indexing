@@ -34,4 +34,7 @@ export class SolTrade {
 
   @IntColumn({ nullable: true })
   fee!: number;
+
+  @DateTimeColumn({ nullable: true })
+  created_at!: Date;
 }

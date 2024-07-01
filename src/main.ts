@@ -27,9 +27,10 @@ const dataSource = new DataSourceBuilder()
     .setRpc(process.env.SOLANA_NODE == null ? undefined : {
         client: new SolanaRpcClient({
             url: process.env.SOLANA_NODE,
+            
             // rateLimit: 100 // requests per sec
         }),
-        strideConcurrency: 20
+        strideConcurrency: 100
     })
     // Currently only blocks from 240_000_000 and above are stored in Subsquid Network.
     // When we specify it, we must also limit the range of requested blocks.
@@ -38,7 +39,7 @@ const dataSource = new DataSourceBuilder()
     //
     // NOTE, that block ranges are specified in heights, not in slots !!!
     //
-    .setBlockRange({from: 274_866_000})
+    .setBlockRange({from: 254_333_354})
     //
     // Block data returned by the data source has the following structure:
     //
@@ -100,7 +101,7 @@ const dataSource = new DataSourceBuilder()
     .addInstruction({
         // select instructions, that:
         where: {
-            programId: [jupiter.programId], // where executed by Whirlpool program
+            programId: [jupiter.programId], 
             d8: [jupiter.instructions.route.d8, jupiter.instructions.sharedAccountsRoute.d8], // have first 8 bytes of .data equal to swap descriptor,
             isCommitted: true, // where successfully committed
             ...jupiter.instructions.route.accountSelection({tokenProgram: ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA']}),
@@ -344,7 +345,8 @@ run(dataSource, database, async ctx => {
                         timestamp: trade.timestamp,
                         token_delta: solIn ? trade.amount_got : -trade.amount_spent,
                         sol_delta: solIn ? -trade.amount_spent : trade.amount_got,
-                        fee: trade.fee
+                        fee: trade.fee,
+                        created_at: new Date()
                     });
 
                     solTrades.push(solTrade);
@@ -429,7 +431,8 @@ run(dataSource, database, async ctx => {
             timestamp: new Date(),
             token_delta: 0,
             sol_delta: 0,
-            fee: 0
+            fee: 0,
+            created_at: new Date()
         };
         let secordTrade: SolTrade = firstTrade;
 
