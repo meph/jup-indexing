@@ -10,10 +10,13 @@ import * as raydium from './abi/raydium'
 import { Exchange, SolTrade, TokenTrade, JupSignature } from './model'
 import { DecodedInstruction } from './abi/abi.support'
 import * as dotenv from 'dotenv';
+import { dbSaveSignature, dbSaveSolTrade, dbSaveTokenTrade, disconnectFromDatabase, connectToDatabase } from './db'
+
 
 dotenv.config();
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
+
 
 // First we create a DataSource - component,
 // that defines where to get the data and what data should we get.
@@ -174,6 +177,8 @@ interface Trade {
 
 // Now we are ready to start data processing
 run(dataSource, database, async ctx => {
+
+    await connectToDatabase();
     // Block items that we get from `ctx.blocks` are flat JS objects.
     //
     // We can use `augmentBlock()` function from `@subsquid/solana-objects`
@@ -331,6 +336,7 @@ run(dataSource, database, async ctx => {
                     // console.log(route.data.routePlan);
                 }
 
+                // skip arbitrages 
                 if (trade.mint_got === trade.mint_spent) break;
 
                 let solIn = trade.mint_spent === SOL_MINT;
@@ -464,9 +470,22 @@ run(dataSource, database, async ctx => {
 
 
 
-    await ctx.store.insert(solTrades);
+    //await ctx.store.insert(solTrades);
     //await ctx.store.insert(tokenTrades);
     //await ctx.store.insert(jupSignatures);
 
+    solTrades.forEach(async (trade) => {
+        await dbSaveSolTrade(trade.id, trade.bucket, trade.trader, trade.mint, trade.timestamp, trade.token_delta, trade.sol_delta);
+    });
+
     //await ctx.store.insert(exchanges)
+    await disconnectFromDatabase();
 })
+
+
+// //                     const events = ins.inner.filter((i) => i.d8 === '0xe445a52e51cb9a1d')
+// events.forEach((i) => {
+//     const data = getInstructionData(i).slice(8)
+//     const event = jupiter.events.SwapEvent.decodeData(data)
+//     console.log(event)
+// })
